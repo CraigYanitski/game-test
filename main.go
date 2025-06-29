@@ -1,30 +1,39 @@
 package main
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"log"
 	"math"
+	"math/rand/v2"
 	"slices"
 
-	"github.com/hajimehoshi/ebiten"
+	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/colorm"
+	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 )
 
 const (
     particleSize = 4
     screenWidth = 320
     screenHeight = 320
-    vXInit = float32(0.25)  //initial x velocity (positive right)
-    vYInit = []float32{-0.25, -0.50}  //initial y velocities (positive down)
     gravity = 0.15  //y acceleration (positive down)
 )
 
 var (
+    vXInit        float32
+    vYInit        []float32
     canvas        *ebiten.Image
     particleImage *ebiten.Image
     positions     []pos
 )
+
+// Initialise initial particle velocities
+func init() {
+    vXInit = float32(0.25)  //initial x velocity (positive right)
+    vYInit = []float32{-0.25, -0.50}  //initial y velocities (positive down)
+}
 
 // initialise particle image
 func init() {
@@ -51,7 +60,7 @@ func init() {
 
 // initialise canvas image
 func init() {
-    canvas := &ebiten.NewImage(screenWidth, screenHeight)
+    canvas = ebiten.NewImage(screenWidth, screenHeight)
 }
 
 type pos struct {
@@ -77,16 +86,17 @@ type particle struct {
 
 func (p *particle) update() error {
     // TODO: finish particle update
-    p.vy := p.vy + gravity
+    p.vy = p.vy + gravity
     xNext := p.x + p.vx
     yNext := p.y + p.vy
     pos := getParticlePosition(p.x, p.y, xNext, yNext)
+    positions[p.id] = pos
     return nil
 }
 
 func (p *particle) draw() {
     op := &colorm.DrawImageOptions{}
-    pos = positions[p.id]
+    pos := positions[p.id]
     op.GeoM.Translate(float64(pos.x), float64(pos.y))
     cm := getParticleColor(p.id)
     colorm.DrawImage(canvas, particleImage, cm, op)
@@ -94,9 +104,9 @@ func (p *particle) draw() {
 
 func getParticleColor(count int) colorm.ColorM {
     var cm colorm.ColorM
-    cm.Scale(0.5, 1.0, 1.0, 1.0)
+    cm.Scale(1.0, 0.5, 0.125, 1.0)
     tps := ebiten.TPS()
-    theta := 2.0 * math.Pi * float32(count%tps) / float32(tps)
+    theta := 2.0 * math.Pi * float64(count%tps) / float64(tps)
     cm.RotateHue(theta)
     return cm
 }
@@ -105,41 +115,95 @@ func getParticleColor(count int) colorm.ColorM {
 func (g *Game) dropParticles(x, y float32) {
     for _, side := range []int{1, -1} {
         for i, vy := range vYInit {
+            xp := x + float32(side*particleSize)
+            yp := y + 2*float32(i*particleSize)
             g.particles = append(g.particles, &particle{
-                x: x + float32(side*particleSize),
-                y: y + float32(i*particleSize),
+                x: xp,
+                y: yp,
                 vx: float32(side)*vXInit,
                 vy: vy,
                 id: g.count,
             })
             g.count++
+            positions = append(positions, pos{
+                x: int(xp/particleSize) * particleSize + int(particleSize/2),
+                y: int(yp/particleSize) * particleSize + int(particleSize/2),
+            })
         }
     }
 }
 
 func getParticlePosition(initX, initY, targetX, targetY float32) (pos) {
-    // TODO: finish function to return the particle position
+    // Initial position in pixels
     initPOS := pos{
-        x: int(initX/particleSize) * particleSize + int(particleSize/2)
-        y: int(initY/particleSize) * particleSize + int(particleSize/2)
+        x: int(initX/particleSize) * particleSize + int(particleSize/2),
+        y: int(initY/particleSize) * particleSize + int(particleSize/2),
     }
+    // Target position in pixels
     targetPOS := pos{
         x: int(targetX/particleSize) * particleSize + int(particleSize/2),
         y: int(targetY/particleSize) * particleSize + int(particleSize/2),
     }
-
-    if !positionOccupied(targetPOS) {
-        return targetPOS
-    } else if !positionOccupied(initPOS) {
-    } else {
+    // Bottom position
+    bottomPOS := pos{
+        x: targetPOS.x,
+        y: screenHeight - int(particleSize/2),
     }
-    return pos{x: 0, y: 0}
+
+    if (targetPOS.y <= (screenHeight - int(particleSize/2))) && 
+        !positionOccupied(bottomPOS) {
+            return bottomPOS
+    } else if !positionOccupied(targetPOS) {
+        return targetPOS
+    } else if positionOccupied(initPOS) {
+        // define height range; y1 < y2
+        y1 := initPOS.y - screenHeight
+        y2 := int(particleSize/2)
+        i := rand.IntN(2)
+        xTarget := targetPOS.x
+        for y := y1; y >= y2; y -= particleSize {
+            // Check position directly above previous target
+            targetPOS.y = y
+            if !positionOccupied(targetPOS) {
+                return targetPOS
+            }
+            // Otherwise check adjacent positions
+            for j := 0; j < 2; j++ {
+                x := []int{targetPOS.x+particleSize, targetPOS.x-particleSize}[(i+j)%2]
+                targetPOS.x = x
+                if !positionOccupied(targetPOS) {
+                    return targetPOS
+                }
+            }
+            // Reset target x position
+            targetPOS.x = xTarget
+        }
+    } else {
+        // define height range; y1 > y2
+        y1 := targetPOS.y - screenHeight
+        y2 := initPOS.y
+        for y := y1; y > y2; y -= screenHeight {
+            targetPOS.y = y
+            if !positionOccupied(targetPOS) {
+                return targetPOS
+            }
+        }
+        i := rand.IntN(2)
+        for j := 0; j < 2; j++ {
+            x := []int{targetPOS.x+particleSize, targetPOS.x-particleSize}[(i+j)%2]
+            targetPOS.x = x
+            if !positionOccupied(targetPOS) {
+                return targetPOS
+            }
+        }
+    }
+    return initPOS
 }
 
-func (g *Game) positionOccupied(targetPos pos) bool {
+func positionOccupied(targetPos pos) bool {
     // Function to determine if particle is already in a given position
     //targetPos := []int{x, y}
-    return slices.Contains(g.positions, targetPos)
+    return slices.Contains(positions, targetPos)
     
     //for _, p := range g.positions {
     //    if slices.Equal(p, targetPos) {
@@ -157,7 +221,7 @@ func (g *Game) Update() error {
             return err
         }
     }
-    if ebiten.IsMouseButtonPressed() {
+    if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
         x, y := ebiten.CursorPosition()
         g.dropParticles(float32(x), float32(y))
     }
@@ -171,17 +235,23 @@ func (g *Game) Draw(screen *ebiten.Image) {
     for _, particle := range g.particles {
         particle.draw()
     }
+
+    screen.DrawImage(canvas, nil)
+    tps := ebiten.TPS()
+    cx, cy := ebiten.CursorPosition()
+    msg := fmt.Sprintf("(%d, %d))\nTPS: %v", cx, cy, tps)
+    ebitenutil.DebugPrint(screen, msg)
 }
 
-func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
+func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
     return screenWidth, screenHeight
 }
 
 func main() {
     game := &Game{}
-    ebiten.SetWindowSize(2+screenWidth, 2*screenHeight)
+    ebiten.SetWindowSize(2*screenWidth, 2*screenHeight)
     ebiten.SetWindowTitle("test game")
-    if err := ebiten.RunGame(game); if err != nil {
+    if err := ebiten.RunGame(game); err != nil {
         log.Fatal(err)
     }
 }
