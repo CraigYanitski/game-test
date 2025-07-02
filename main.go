@@ -16,10 +16,10 @@ import (
 )
 
 const (
-    mag = 0.5
+    mag = 1
     particleSize = 4
     screenWidth = 1000
-    screenHeight = 2000
+    screenHeight = 1000
     rotationRate = 3000
     gravity = 0.8*float32(particleSize)  //y acceleration (positive down)
 )
@@ -30,10 +30,12 @@ var (
     canvas        *ebiten.Image
     particleImage *ebiten.Image
     positions     []pos
+    state         string
 )
 
 // Initialise initial particle velocities
 func init() {
+    state = "Waiting..."
     vXInit = 1*float32(particleSize)  //initial x velocity (positive right)
     vYInit = []float32{-5*float32(particleSize), -10.5*float32(particleSize)}  //initial y velocities (positive down)
 }
@@ -130,6 +132,9 @@ func (g *Game) dropParticles(x, y float32) {
         for i, vy := range vYInit {
             xp := x + float32(side*particleSize)
             yp := y + 2*float32(i*particleSize)
+            if positionOccupied(pos{x: int(xp/particleSize)*particleSize+int(particleSize/2), y: int(yp/particleSize)*particleSize+int(particleSize/2)}) {
+                continue
+            }
             g.particles = append(g.particles, &particle{
                 x: xp,
                 y: yp,
@@ -172,21 +177,21 @@ func getParticlePosition(p *particle, targetX, targetY float32) (position pos, f
 
     if (targetPOS.y >= bottomPOS.y) && 
         !positionOccupied(bottomPOS) {
-            (*p).vx = 0
-            (*p).vy = 0
+            p.vx = 0
+            p.vy = 0
             return bottomPOS, false
     } else if (initPOS == bottomPOS) || 
         (positionOccupied(pos{x: initPOS.x, y: initPOS.y-particleSize}) && 
-        (positionOccupied(pos{x: initPOS.x-particleSize, y:initPOS.y-particleSize}) || positionOccupied(pos{x: initPOS.x+particleSize, y: initPOS.y-particleSize}))) {
-            p.vx = 0
-            p.vy = 0
-            return initPOS, false
+            (positionOccupied(pos{x: initPOS.x-particleSize, y:initPOS.y-particleSize}) || positionOccupied(pos{x: initPOS.x+particleSize, y: initPOS.y-particleSize}))) {
+                p.vx = 0
+                p.vy = 0
+                return initPOS, false
     } else if !positionOccupied(targetPOS) && (targetPOS.y < bottomPOS.y) {
         falling = true
         return targetPOS, true
     } else {
         p.vx = 0
-        p.vy = max(0, particleSize)
+        p.vy = 2*particleSize  //max(0, particleSize)
         falling = true
         // define height range; y1 > y2
         y1 := targetPOS.y - particleSize
@@ -202,7 +207,6 @@ func getParticlePosition(p *particle, targetX, targetY float32) (position pos, f
         }
         source := rand.New(rand.NewSource(time.Now().UnixNano()))
         i := source.Intn(2)
-        //fmt.Println(i, p.falling)
         for j := 0; j < 2; j++ {
             x := targetPOS.x + (((i+j) % 2)*2 - 1) * particleSize
             if (x < int(particleSize/2)) || (x > (screenWidth - int(particleSize/2))) {
@@ -226,29 +230,20 @@ func positionOffscreen(p pos) bool {
 }
 
 func (g *Game) Update() error {
-    ch := make(chan error)
-    go func(particles []*particle) error {
-        defer close(ch)
-        for _, p := range g.particles {
-            if positionOffscreen(pos{x: int(p.x), y: int(p.y)}) {
-                continue
-            }
-            err := p.update()
-            if err != nil {
-                return err
-            }
+    for _, p := range g.particles {
+        if positionOffscreen(pos{x: int(p.x), y: int(p.y)}) {
+            p.falling = false
+            continue
         }
-        return nil
-    }(g.particles)
-
-    for err := range ch {
+        err := p.update()
         if err != nil {
             return err
         }
     }
+
     if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
         x, y := ebiten.CursorPosition()
-        if !positionOffscreen(pos{x: x, y: y}) {
+        if !positionOffscreen(pos{x: x, y: y}) && !positionOccupied(pos{x: int(x/particleSize)*particleSize+int(particleSize/2), y: int(y/particleSize)*particleSize+int(particleSize/2)}) {
             g.dropParticles(float32(x), float32(y))
         }
     }
@@ -256,27 +251,30 @@ func (g *Game) Update() error {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-    ch := make(chan bool)
     canvas.Clear()
     canvas.Fill(color.Black)
-    go func(particles []*particle) {
-        defer close(ch)
-        for _, p := range particles {
-            if positionOffscreen(pos{x: int(p.x), y: int(p.y)}) {
-                continue
-            }
-            p.draw()
+    falling := false
+    for _, p := range g.particles {
+        if p.falling {
+            falling = p.falling
         }
-    }(g.particles)
-
-    for _ = range ch {
-        continue
+        if positionOffscreen(pos{x: int(p.x), y: int(p.y)}) {
+            continue
+        }
+        p.draw()
     }
+    if falling && (state != "Falling...") {
+        state = "Falling..."
+        //log.Println("Falling...")
+    } else if !falling && (state == "Falling...") {
+        state = "Settled."
+    }
+    falling = false
 
     screen.DrawImage(canvas, nil)
     tps := ebiten.ActualTPS()
     cx, cy := ebiten.CursorPosition()
-    msg := fmt.Sprintf("(%d, %d))\nParticles: %d\nTPS: %.2f", cx, cy, g.count, tps)
+    msg := fmt.Sprintf("(%d, %d))\nParticles: %d\nTPS: %.2f\nState: %v", cx, cy, g.count, tps, state)
     ebitenutil.DebugPrint(screen, msg)
 }
 
