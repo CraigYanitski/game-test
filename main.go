@@ -16,7 +16,7 @@ import (
 )
 
 const (
-    mag = 1
+    mag = 1.0
     particleSize = 4
     screenWidth = 1000
     screenHeight = 1000
@@ -29,7 +29,7 @@ var (
     vYInit        []float32
     canvas        *ebiten.Image
     particleImage *ebiten.Image
-    positions     []pos
+    positions     []Pos
     state         string
 )
 
@@ -68,7 +68,7 @@ func init() {
     canvas = ebiten.NewImage(screenWidth, screenHeight)
 }
 
-type pos struct {
+type Pos struct {
     x int
     y int
 }
@@ -76,21 +76,21 @@ type pos struct {
 type Game struct {
     count       int
     background  int
-    particles   []*particle
+    particles   []*Particle
     //positions   []pos
 }
 
-type particle struct {
+type Particle struct {
     x float32
     y float32
     vx float32
     vy float32
-    pos pos
+    pos Pos
     id int
     falling bool
 }
 
-func (p *particle) update() error {
+func (p *Particle) update() error {
     //if !p.falling {
     //    return nil
     //}
@@ -110,7 +110,7 @@ func (p *particle) update() error {
     return nil
 }
 
-func (p *particle) draw() {
+func (p *Particle) draw() {
     op := &colorm.DrawImageOptions{}
     pos := positions[p.id]
     op.GeoM.Translate(float64(pos.x), float64(pos.y))
@@ -132,10 +132,10 @@ func (g *Game) dropParticles(x, y float32) {
         for i, vy := range vYInit {
             xp := x + float32(side*particleSize)
             yp := y + 2*float32(i*particleSize)
-            if positionOccupied(pos{x: int(xp/particleSize)*particleSize+int(particleSize/2), y: int(yp/particleSize)*particleSize+int(particleSize/2)}) {
+            if positionOccupied(Pos{x: int(xp/particleSize)*particleSize+int(particleSize/2), y: int(yp/particleSize)*particleSize+int(particleSize/2)}) {
                 continue
             }
-            g.particles = append(g.particles, &particle{
+            g.particles = append(g.particles, &Particle{
                 x: xp,
                 y: yp,
                 vx: float32(side)*vXInit,
@@ -144,7 +144,7 @@ func (g *Game) dropParticles(x, y float32) {
                 falling: true,
             })
             g.count++
-            positions = append(positions, pos{
+            positions = append(positions, Pos{
                 x: int(xp/particleSize) * particleSize + int(particleSize/2),
                 y: int(yp/particleSize) * particleSize + int(particleSize/2),
             })
@@ -152,44 +152,54 @@ func (g *Game) dropParticles(x, y float32) {
     }
 }
 
-func getParticlePosition(p *particle, targetX, targetY float32) (position pos, falling bool) {
+func getParticlePosition(p *Particle, targetX, targetY float32) (position Pos, falling bool) {
     falling = false
     // Filter out out of bounds particles
     if p.x < 0 || p.x > screenWidth || p.y > screenHeight {
-        return pos{x: int(screenWidth/2), y: screenHeight+particleSize}, falling
+        return Pos{x: int(screenWidth/2), y: screenHeight+particleSize}, falling
     }
 
     // Initial position in pixels
-    initPOS := pos{
+    initPOS := Pos{
         x: int(p.x/particleSize) * particleSize + int(particleSize/2),
         y: int(p.y/particleSize) * particleSize + int(particleSize/2),
     }
     // Target position in pixels
-    targetPOS := pos{
+    targetPOS := Pos{
         x: int(targetX/particleSize) * particleSize + int(particleSize/2),
         y: int(targetY/particleSize) * particleSize + int(particleSize/2),
     }
     // Bottom position
-    bottomPOS := pos{
-        x: targetPOS.x,
+    bottomPOS := Pos{
+        x: int(targetX/particleSize) * particleSize + int(particleSize/2),
+        //x: targetPOS.x,
         y: screenHeight - int(particleSize/2),
     }
 
     if (targetPOS.y >= bottomPOS.y) && 
         !positionOccupied(bottomPOS) {
+            fmt.Println("out of bounds: to bottom")
+            fmt.Println(initPOS, positionOccupied(initPOS), targetX, targetY, bottomPOS, 
+                positionOccupied(Pos{x:targetPOS.x, y: targetPOS.y}),
+            )
+            fmt.Println(positions)
             p.vx = 0
             p.vy = 0
             return bottomPOS, false
     } else if (initPOS == bottomPOS) || 
-        (positionOccupied(pos{x: initPOS.x, y: initPOS.y-particleSize}) && 
-            (positionOccupied(pos{x: initPOS.x-particleSize, y:initPOS.y-particleSize}) || positionOccupied(pos{x: initPOS.x+particleSize, y: initPOS.y-particleSize}))) {
+        (positionOccupied(Pos{x: initPOS.x, y: initPOS.y-particleSize}) && 
+            (positionOccupied(Pos{x: initPOS.x-particleSize, y:initPOS.y-particleSize}) || 
+            positionOccupied(Pos{x: initPOS.x+particleSize, y: initPOS.y-particleSize}))) {
+                fmt.Println("Stationary")
                 p.vx = 0
                 p.vy = 0
                 return initPOS, false
     } else if !positionOccupied(targetPOS) && (targetPOS.y < bottomPOS.y) {
+        fmt.Println("fall")
         falling = true
         return targetPOS, true
     } else {
+        fmt.Println("Fall partial")
         p.vx = 0
         p.vy = 2*particleSize  //max(0, particleSize)
         falling = true
@@ -221,17 +231,17 @@ func getParticlePosition(p *particle, targetX, targetY float32) (position pos, f
     return initPOS, false
 }
 
-func positionOccupied(targetPos pos) bool {
+func positionOccupied(targetPos Pos) bool {
     return slices.Contains(positions, targetPos)
 }
 
-func positionOffscreen(p pos) bool {
+func positionOffscreen(p Pos) bool {
     return (p.x < 0) || (p.x > screenWidth) || (p.y > screenHeight)
 }
 
 func (g *Game) Update() error {
     for _, p := range g.particles {
-        if positionOffscreen(pos{x: int(p.x), y: int(p.y)}) {
+        if positionOffscreen(Pos{x: int(p.x), y: int(p.y)}) {
             p.falling = false
             continue
         }
@@ -243,7 +253,7 @@ func (g *Game) Update() error {
 
     if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
         x, y := ebiten.CursorPosition()
-        if !positionOffscreen(pos{x: x, y: y}) && !positionOccupied(pos{x: int(x/particleSize)*particleSize+int(particleSize/2), y: int(y/particleSize)*particleSize+int(particleSize/2)}) {
+        if !positionOffscreen(Pos{x: x, y: y}) && !positionOccupied(Pos{x: int(x/particleSize)*particleSize+int(particleSize/2), y: int(y/particleSize)*particleSize+int(particleSize/2)}) {
             g.dropParticles(float32(x), float32(y))
         }
     }
@@ -258,7 +268,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
         if p.falling {
             falling = p.falling
         }
-        if positionOffscreen(pos{x: int(p.x), y: int(p.y)}) {
+        if positionOffscreen(Pos{x: int(p.x), y: int(p.y)}) {
             continue
         }
         p.draw()
