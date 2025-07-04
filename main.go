@@ -77,7 +77,7 @@ type Game struct {
     count       int
     background  int
     particles   []*Particle
-    //positions   []pos
+    positions   []Pos
 }
 
 type Particle struct {
