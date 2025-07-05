@@ -73,11 +73,17 @@ type Pos struct {
     y int
 }
 
+type Vel struct {
+    x  float32
+    y  float32
+}
+
 type Game struct {
     count       int
     background  int
     particles   []*Particle
     positions   []Pos
+    velocities  []Vel
 }
 
 type Particle struct {
